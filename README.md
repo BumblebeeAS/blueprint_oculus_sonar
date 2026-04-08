@@ -1,42 +1,69 @@
-# Blueprint Oculus Sonar ROS2 driver
+# Blueprint Oculus Sonar ROS2 Driver
 
-This is a ROS2 metapackage including:
- * A ROS2 package **oculus_interfaces** containing the useful ROS messages definitions,
- * A ROS2 package **oculus_ros2** interfacing the driver messages with ROS2 topics,
+ROS2 metapackage for the Blueprint Oculus M750d forward-looking sonar, containing:
 
-This ROS2 metapackage was developed and tested using:<br>
-* Ubuntu 24.04 LTS<br>
-* ROS2 jazzy
-* M750d Sonar
-### Dependencies
-`sudo apt-get install libboost-dev libboost-system-dev libboost-thread-dev ros-jazzy-cv-bridge`
-### Messages
-* Fan Shaped Image : "oculus/image" (sensor_msgs::msg::Image)
-* Bin-Beam Image : "oculus/raw_image" (sensor_msgs::msg:Image)
-* Pressure : "oculus/pressure" (sensor_msgs::msg::FluidPressure)
-* Temperature : "oculus/temperature" (sensor_msgs::msg::Temperature)
-* Depth : "oculus/depth/odometry" (nav_msgs::msg::Odometry)
-* Status : "oculus/status" (oculus_interfaces::msg::OculusStatus)
-* Ping : "oculus/ping"
-(oculus_interfaces::msg::Ping)
-### Installation
-```sh
-$ cd ~/YOUR_WS/src
-$ git clone https://github.com/GSO-soslab/blueprint_oculus_sonar
-$ cd blueprint_oculus_sonar
-$ git checkout jazzy-devel
-$ cd ../..
-$ colcon build --packages-select oculus_interfaces oculus_ros2
+- **oculus_interfaces** -- ROS2 message definitions (`Ping`, `OculusStatus`, etc.)
+- **oculus_ros2** -- ROS2 node wrapping the [ENSTABretagneRobotics/oculus_driver](https://github.com/ENSTABretagneRobotics/oculus_driver.git) C++ library
+
+Tested on Ubuntu 22.04 / ROS2 Humble with the M750d sonar.
+
+For a detailed walkthrough of the data pipeline, message construction, and image processing internals, see [PIPELINE.md](PIPELINE.md).
+
+## Published Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `oculus/ping` | `oculus_interfaces::msg::Ping` | Full ping message with raw data |
+| `oculus/image` | `sensor_msgs::msg::Image` | Cartesian fan-shaped image |
+| `oculus/raw_image` | `sensor_msgs::msg::Image` | Polar (bin-beam) image |
+| `oculus/pointcloud` | `sensor_msgs::msg::PointCloud2` | 3D point cloud (x, y, z, intensity) |
+| `oculus/pressure` | `sensor_msgs::msg::FluidPressure` | External pressure (bar) |
+| `oculus/temperature` | `sensor_msgs::msg::Temperature` | External temperature (C) |
+| `oculus/depth/odometry` | `nav_msgs::msg::Odometry` | Depth computed from pressure |
+| `oculus/status` | `oculus_interfaces::msg::OculusStatus` | Sonar connection status |
+
+## Sonar Configuration
+
+Configuration flags sent to the sonar via `SonarDriver::request_ping_config()`:
+
+| Flag | Bit | Description |
+|------|-----|-------------|
+| `RANGE_AS_METERS` | 0 | Range interpreted as meters (always on) |
+| `DATA_DEPTH` | 1 | 8-bit vs 16-bit data |
+| `SEND_GAINS` | 2 | Include per-row gain data (always on) |
+| `SIMPLE_PING` | 3 | Use simple ping format (always on) |
+| `GAIN_ASSIST` | 4 | Automatic gain assist |
+| `NBEAMS` | 6 | 256 (off) vs 512 (on) beams |
+
+ROS parameters (`frequency_mode`, `range`, `gain_percent`, `sound_speed`) are exposed as dynamic reconfigure parameters and synced bidirectionally with the sonar hardware.
+
+## Dependencies
+
+```bash
+sudo apt-get install libboost-dev libboost-system-dev libboost-thread-dev ros-humble-cv-bridge
 ```
 
-### Launch
+## Installation
 
-```sh
-$ ros2 launch oculus_ros2 default.launch.py
+```bash
+cd ~/YOUR_WS/src
+git clone https://github.com/BumblebeeAS/blueprint_oculus_sonar.git
+cd blueprint_oculus_sonar
+git checkout humble
+cd ../..
+colcon build --packages-select oculus_interfaces oculus_ros2
 ```
 
-### Troubleshooting
-The sonar itself has a fixed IP address which may or may not be indicated on the box. To avoid bricking of the sonar by "lack of post-it", the sonar makes itself known on the network by broadcasting its own IP address. This library should always detect the IP of a plugged in Oculus sonar. You should make sure your own system configuration match the configuration of the sonar (i.e. your system and the sonar must be on the same subnet).
+## Launch
 
-### Acknowledgement
-This repository is modified version of [ENSTABretagneRobotics](https://github.com/ENSTABretagneRobotics/oculus_ros2) ROS2 driver for the Blueprint Oculus Driver to suit our needs. We really appreciate their work.
+```bash
+ros2 launch oculus_ros2 default.launch.py
+```
+
+## Troubleshooting
+
+The sonar has a fixed IP address which may or may not be indicated on the box. The driver broadcasts to discover the sonar's IP automatically. Ensure your system and the sonar are on the same subnet.
+
+## Acknowledgement
+
+Modified from [ENSTABretagneRobotics/oculus_ros2](https://github.com/ENSTABretagneRobotics/oculus_ros2). We appreciate their work.
