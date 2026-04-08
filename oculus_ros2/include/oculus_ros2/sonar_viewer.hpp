@@ -7,8 +7,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -20,20 +20,21 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef OCULUS_ROS2__SONAR_VIEWER_HPP_
 #define OCULUS_ROS2__SONAR_VIEWER_HPP_
 
-#include <cv_bridge/cv_bridge.hpp>
+#include <cv_bridge/cv_bridge.h>
 #include <oculus_driver/AsyncService.h>
 #include <oculus_driver/SonarDriver.h>
 
@@ -41,10 +42,6 @@
 #include <climits>
 #include <iostream>
 #include <limits>
-#include <string>
-#include <type_traits>
-#include <vector>
-
 #include <oculus_interfaces/msg/ping.hpp>
 #include <oculus_ros2/conversions.hpp>
 #include <opencv2/core.hpp>
@@ -52,50 +49,49 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/header.hpp>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 class SonarViewer {
 public:
-  explicit SonarViewer(rclcpp::Node* node);
-  ~SonarViewer();
-  void publishFan(const oculus::PingMessage::ConstPtr& ping, const std::string& frame_id = "sonar") const;
-  void publishFan(const oculus_interfaces::msg::Ping& ros_ping_msg) const;
-  void publishFan(const int& width,
-      const int& height,
-      const int& offset,
-      const std::vector<uint8_t>& ping_data,
-      const int& master_mode,
-      const std_msgs::msg::Header& header) const;
-  
-  void publishRaw(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id);
-  void pingToImageConversion(const oculus_interfaces::msg::Ping& ros_ping_msg,
-    int& bearings, int& ranges,
-    cv::Mat& map_bb_x, cv::Mat& map_bb_y,
-    int& img_cols, int& img_rows, 
-    cv::Mat& map_img_x, cv::Mat& map_img_y);
-  void pingToIntensity(
-    const oculus_interfaces::msg::Ping& ros_ping_msg,
-    cv::Mat& intensity);
-  double interpolateBin(const std::vector<double> &bearings, double bearing);
-  
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_;
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr raw_image_publisher_;
+    explicit SonarViewer(rclcpp::Node* node);
+    ~SonarViewer();
+    void publishFan(const oculus::PingMessage::ConstPtr& ping, const std::string& frame_id = "sonar") const;
+    void publishFan(const oculus_interfaces::msg::Ping& ros_ping_msg) const;
+    void publishFan(const int& width, const int& height, const int& offset, const std::vector<uint8_t>& ping_data,
+                    const int& master_mode, const std_msgs::msg::Header& header) const;
 
+    void publishRaw(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id);
+    void pingToImageConversion(const oculus_interfaces::msg::Ping& ros_ping_msg, int& bearings, int& ranges,
+                               cv::Mat& map_bb_x, cv::Mat& map_bb_y, int& img_cols, int& img_rows, cv::Mat& map_img_x,
+                               cv::Mat& map_img_y);
+    void pingToIntensity(const oculus_interfaces::msg::Ping& ros_ping_msg, cv::Mat& intensity,
+                         bool use_gain_compensation = false);
+    void publishPointCloud(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id);
+    double interpolateBin(const std::vector<double>& bearings, double bearing);
+
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr raw_image_publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_publisher_;
 
 protected:
-  const double LOW_FREQUENCY_BEARING_APERTURE_ = 65.;
-  const double HIGHT_FREQUENCY_BEARING_APERTURE_ = 40.;
-  const int SIZE_OF_GAIN_ = 4;
+    const double LOW_FREQUENCY_BEARING_APERTURE_   = 65.;
+    const double HIGHT_FREQUENCY_BEARING_APERTURE_ = 40.;
+    const int SIZE_OF_GAIN_                        = 4;
 
 private:
-  const rclcpp::Node* node_;
-  cv::Mat map_bb_x_, map_bb_y_;
+    const rclcpp::Node* node_;
+    cv::Mat map_bb_x_, map_bb_y_;
 
-  cv::Mat map_img_x_, map_img_y_;
+    cv::Mat map_img_x_, map_img_y_;
 
-  int num_bearings_, num_ranges_;
+    int num_bearings_, num_ranges_;
 
-  int img_cols_, img_rows_;
+    int img_cols_, img_rows_;
 };
 
 #endif  // OCULUS_ROS2__SONAR_VIEWER_HPP_

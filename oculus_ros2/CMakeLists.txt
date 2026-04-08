@@ -49,7 +49,45 @@ ament_target_dependencies(oculus_sonar_node PUBLIC
     cv_bridge
 )
 
+add_executable(sonar_pointcloud_node
+    src/sonar_pointcloud_node.cpp
+    src/sonar_viewer.cpp
+)
+target_include_directories(sonar_pointcloud_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(sonar_pointcloud_node PRIVATE
+    oculus_driver
+)
+ament_target_dependencies(sonar_pointcloud_node PUBLIC
+    rclcpp
+    oculus_interfaces
+    sensor_msgs
+    OpenCV
+    cv_bridge
+)
+
+add_executable(sonar_raw_image_node
+    src/sonar_raw_image_node.cpp
+    src/sonar_viewer.cpp
+)
+target_include_directories(sonar_raw_image_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(sonar_raw_image_node PRIVATE
+    oculus_driver
+)
+ament_target_dependencies(sonar_raw_image_node PUBLIC
+    rclcpp
+    oculus_interfaces
+    sensor_msgs
+    OpenCV
+    cv_bridge
+)
+
 install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
-install(TARGETS oculus_sonar_node DESTINATION lib/${PROJECT_NAME})
+install(TARGETS oculus_sonar_node sonar_pointcloud_node sonar_raw_image_node DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

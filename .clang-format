@@ -1,0 +1,20 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+AccessModifierOffset: -4
+AlignConsecutiveAssignments: true
+AlignConsecutiveMacros: true
+AlignEscapedNewlines: Left
+AlignOperands: true
+AlignTrailingComments: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortFunctionsOnASingleLine: false
+BreakBeforeBinaryOperators: All
+BreakBeforeTernaryOperators: true
+ColumnLimit: 120
+CompactNamespaces: false
+IndentAccessModifiers: false
+IndentCaseLabels: false
+IndentWidth: 4
+SpacesInContainerLiterals: true
+UseTab: Never
