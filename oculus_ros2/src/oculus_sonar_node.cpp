@@ -41,8 +41,9 @@ OculusSonarNode::OculusSonarNode()
     : Node("oculus_sonar"),
       is_running_(this->declare_parameter<bool>("run", true)),
       sonar_viewer_(static_cast<rclcpp::Node*>(this)),
-      frame_id_(this->declare_parameter<std::string>("frame_id", "sonar")),
+      frame_id_(this->declare_parameter<std::string>("frame_id", "auv4/sonar")),
       odom_msg_parent_frame_id_(this->declare_parameter<std::string>("odom_msg_parent_frame_id", "world")),
+      use_gain_compensation_(this->declare_parameter<bool>("use_gain_compensation", false)),
       fluid_density_(this->declare_parameter<float>("fluid_density", 997.0474)),
       z_covariance_(this->declare_parameter<float>("z_covariance", 0.2))
 
@@ -257,9 +258,9 @@ void OculusSonarNode::publishPing(const oculus::PingMessage::ConstPtr& ping) {
     // TODO(hugoyvrn, publish bearings)
 
     // ping : OculusMsg. msg : ROS custom msg.
-    sonar_viewer_.publishFan(ping, frame_id_);        // cartesian
-    sonar_viewer_.publishRaw(msg, frame_id_);         // polar
-    sonar_viewer_.publishPointCloud(msg, frame_id_);  // pointcloud sonar frame
+    sonar_viewer_.publishFan(ping, frame_id_);                                // cartesian
+    sonar_viewer_.publishRaw(msg, frame_id_, use_gain_compensation_);         // polar
+    sonar_viewer_.publishPointCloud(msg, frame_id_, use_gain_compensation_);  // pointcloud sonar frame
 }
 
 void OculusSonarNode::updateLocalParameters(SonarParameters& parameters,

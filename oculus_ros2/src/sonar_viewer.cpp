@@ -134,7 +134,8 @@ void SonarViewer::publishFan(const int& width, const int& height, const int& off
     image_publisher_->publish(msg);
 }
 
-void SonarViewer::publishRaw(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id) {
+void SonarViewer::publishRaw(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id,
+                             bool use_gain_compensation) {
     pingToImageConversion(ros_ping_msg, num_bearings_, num_ranges_, map_bb_x_, map_bb_y_, img_cols_, img_rows_,
                           map_img_x_, map_img_y_);
 
@@ -144,10 +145,10 @@ void SonarViewer::publishRaw(const oculus_interfaces::msg::Ping& ros_ping_msg, c
     const char* ros_image_encoding = sensor_msgs::image_encodings::MONO8;
 
     cv::Mat intensity;
-    pingToIntensity(ros_ping_msg, intensity);
+    pingToIntensity(ros_ping_msg, intensity, use_gain_compensation);
 
     cv::Mat img_raw(cv::Size(img_cols_, img_rows_), intensity.type());
-    cv::remap(intensity, img_raw, map_img_x_, map_img_y_, cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
+    cv::remap(intensity, img_raw, map_bb_x_, map_bb_y_, cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
 
     // Publish polar sonar image
     sensor_msgs::msg::Image bin_beam_img_msg;
@@ -212,7 +213,7 @@ void SonarViewer::pingToImageConversion(const oculus_interfaces::msg::Ping& ros_
 
     double new_height = ros_ping_msg.range_resolution * ros_ping_msg.n_ranges;
     double new_width  = sin((ros_ping_msg.bearings.back() - ros_ping_msg.bearings.front()) * 0.01 * M_PI / 180.0 / 2.0)
-                        * new_height * 2;
+                       * new_height * 2;
     auto new_cols     = ceil(new_width / ros_ping_msg.range_resolution);
     auto new_rows     = ros_ping_msg.n_ranges;
 
@@ -266,7 +267,8 @@ void SonarViewer::pingToImageConversion(const oculus_interfaces::msg::Ping& ros_
     }
 }
 
-void SonarViewer::publishPointCloud(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id) {
+void SonarViewer::publishPointCloud(const oculus_interfaces::msg::Ping& ros_ping_msg, const std::string& frame_id,
+                                    bool use_gain_compensation) {
     const int num_ranges   = ros_ping_msg.n_ranges;
     const int num_bearings = ros_ping_msg.n_beams;
     const double range_res = ros_ping_msg.range_resolution;
@@ -277,7 +279,7 @@ void SonarViewer::publishPointCloud(const oculus_interfaces::msg::Ping& ros_ping
     pingToImageConversion(ros_ping_msg, bearings, ranges, map_bb_x, map_bb_y, cols, rows, map_img_x, map_img_y);
 
     cv::Mat intensity;
-    pingToIntensity(ros_ping_msg, intensity);
+    pingToIntensity(ros_ping_msg, intensity, use_gain_compensation);
 
     // Pre-compute bearing angles in radians
     std::vector<double> bearings_rad(num_bearings);

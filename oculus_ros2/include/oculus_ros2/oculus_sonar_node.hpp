@@ -169,6 +169,7 @@ private:
   SonarViewer sonar_viewer_;
   const std::string frame_id_;
   const std::string odom_msg_parent_frame_id_;
+  const bool use_gain_compensation_;
   float fluid_density_;
   float z_covariance_;
   float ACCL_GRAVITY = 9.80665;
