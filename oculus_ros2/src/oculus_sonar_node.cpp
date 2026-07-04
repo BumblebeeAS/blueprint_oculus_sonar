@@ -107,8 +107,13 @@ OculusSonarNode::OculusSonarNode()
         }
     }
 
-    // Get the current sonar config
-    updateLocalParameters(currentSonarParameters_, this->sonar_driver_->current_ping_config());
+    // Get the current sonar config. Seed currentConfig_ from the sonar's real
+    // config here: sendParamToSonar() starts each request from currentConfig_,
+    // and without this seed the very first config-set at startup would build its
+    // fire message from uninitialized memory (garbage range/pingRate/speedOfSound),
+    // which the sonar rejects -> connection dropped on the first ping config.
+    currentConfig_ = this->sonar_driver_->current_ping_config();
+    updateLocalParameters(currentSonarParameters_, currentConfig_);
     for (const std::string& param_name : dynamic_parameters_names_) {
         setConfigCallback(this->get_parameters(std::vector{param_name}));
     }
@@ -359,6 +364,12 @@ void OculusSonarNode::sendParamToSonar(rclcpp::Parameter param, rcl_interfaces::
         // RCLCPP_INFO_STREAM(this->get_logger(), "Updating frequency_mode to " <<
         // param.as_int() << " (1: 1.2MHz, 2: 2.1MHz).");
         newConfig.masterMode = param.as_int();
+        // The sonar silently refuses a frequency change while gain assist is
+        // enabled, leaving the device in its previous mode (this is why the very
+        // first launch sticks at mode 2). Clear gain assist in the same fire config
+        // so the frequency change always takes effect; the gain_assist parameter is
+        // re-applied on its own afterwards (e.g. by the startup parameter loop).
+        newConfig.flags &= ~flagByte::GAIN_ASSIST;
     } else if (param.get_name() == params::PING_RATE.name) {
         // RCLCPP_INFO_STREAM(this->get_logger(), "Updating ping_rate to " <<
         // param.as_int() << " (" + params::PING_RATE.desc + ").");
@@ -469,15 +480,10 @@ rcl_interfaces::msg::SetParametersResult OculusSonarNode::setConfigCallback(
 
         } else if (std::find(dynamic_parameters_names_.begin(), dynamic_parameters_names_.end(), param.get_name())
                    != dynamic_parameters_names_.end()) {
-            // QUICK FIX TODO(hugoyvrn, gain_assist not working, to fix)
-            if (currentSonarParameters_.gain_assist && currentSonarParameters_.frequency_mode
-                && param.get_name() == params::FREQUENCY_MODE.name) {
-                result.reason
-                    = "You must set gain_assist to false before changing "
-                      "frequency TODO(to fix).";
-                return result;
-            }
-            // END QUICK FIX
+            // Frequency changes used to be refused here when gain_assist was on,
+            // which silently dropped the configured frequency_mode at startup.
+            // sendParamToSonar() now clears gain assist as part of a frequency
+            // change, so the request can always proceed.
             sendParamToSonar(param, result);
         }
     }

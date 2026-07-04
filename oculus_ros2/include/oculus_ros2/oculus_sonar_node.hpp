@@ -151,9 +151,9 @@ protected:
       params::NBEAMS.name, params::GAIN_ASSIT.name, params::RANGE.name, params::GAMMA_CORRECTION.name, params::GAIN_PERCENT.name,
       params::SOUND_SPEED.name, params::USE_SALINITY.name, params::SALINITY.name, "run"};
 
-  SonarParameters currentSonarParameters_;
-  SonarParameters currentRosParameters_;
-  oculus::SonarDriver::PingConfig currentConfig_;
+  SonarParameters currentSonarParameters_{};
+  SonarParameters currentRosParameters_{};
+  oculus::SonarDriver::PingConfig currentConfig_{};  // zero-init: never send indeterminate bytes to the sonar
 
   bool is_running_;  // State value. Same value as ros parameter "run"
   bool is_overheating_ = false;  // State value
