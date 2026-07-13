@@ -22,6 +22,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(oculus_interfaces REQUIRED)
@@ -44,6 +45,29 @@ ament_target_dependencies(oculus_sonar_node PUBLIC
     oculus_interfaces
     rcl_interfaces
     sensor_msgs
+    std_srvs
+    nav_msgs
+    OpenCV
+    cv_bridge
+)
+
+add_executable(sonar_depth_node
+    src/sonar_depth_node.cpp
+    src/sonar_viewer.cpp
+)
+target_include_directories(sonar_depth_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(sonar_depth_node PRIVATE
+    oculus_driver
+)
+ament_target_dependencies(sonar_depth_node PUBLIC
+    rclcpp
+    oculus_interfaces
+    rcl_interfaces
+    sensor_msgs
+    std_srvs
     nav_msgs
     OpenCV
     cv_bridge
@@ -88,6 +112,6 @@ ament_target_dependencies(sonar_raw_image_node PUBLIC
 )
 
 install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
-install(TARGETS oculus_sonar_node sonar_pointcloud_node sonar_raw_image_node DESTINATION lib/${PROJECT_NAME})
+install(TARGETS oculus_sonar_node sonar_depth_node sonar_pointcloud_node sonar_raw_image_node DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

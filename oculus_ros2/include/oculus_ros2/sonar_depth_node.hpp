@@ -30,12 +30,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef OCULUS_ROS2__OCULUS_SONAR_NODE_HPP_
-#define OCULUS_ROS2__OCULUS_SONAR_NODE_HPP_
+#ifndef OCULUS_ROS2__SONAR_DEPTH_NODE_HPP_
+#define OCULUS_ROS2__SONAR_DEPTH_NODE_HPP_
 
 #include <oculus_driver/AsyncService.h>
 #include <oculus_driver/SonarDriver.h>
 
+#include <atomic>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -52,6 +53,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/fluid_pressure.hpp>
 #include <sensor_msgs/msg/temperature.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <std_msgs/msg/header.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 struct SonarParameters {
   int frequency_mode;
@@ -140,10 +144,10 @@ const std::vector<DoubleParam> DOUBLE = {RANGE, GAIN_PERCENT, SOUND_SPEED, SALIN
 
 }  // namespace params
 
-class OculusSonarNode : public rclcpp::Node {
+class SonarDepthNode : public rclcpp::Node {
 public:
-  OculusSonarNode();
-  ~OculusSonarNode();
+  SonarDepthNode();
+  ~SonarDepthNode();
 
 protected:
   const std::vector<std::string> dynamic_parameters_names_{params::FREQUENCY_MODE.name, params::PING_RATE.name,
@@ -167,12 +171,28 @@ private:
 
   SonarViewer sonar_viewer_;
   const std::string frame_id_;
+  const std::string odom_msg_parent_frame_id_;
   const bool use_gain_compensation_;
+  float fluid_density_;
+  float z_covariance_;
+  float ACCL_GRAVITY = 9.80665;
+  static constexpr double BAR_TO_PA = 1e5;  // Sonar reports pressure in bar (see Oculus.h)
+
+  // Depth is computed from the sonar's external (gauge) pressure. pressure_tare_pa_
+  // is a user-settable offset (in Pascals) subtracted before converting to depth, so
+  // the "tare_pressure" service can zero the depth at the sonar's current position.
+  // Both are written from the sonar callback thread and read from the service thread.
+  std::atomic<double> last_pressure_pa_{0.0};    // most recent reading, in Pascals
+  std::atomic<double> pressure_tare_pa_{0.0};    // offset subtracted from pressure before depth
+  std::atomic<bool> pressure_received_{false};   // true once a real reading has arrived
 
   rclcpp::Publisher<oculus_interfaces::msg::OculusStatus>::SharedPtr status_publisher_{nullptr};
   rclcpp::Publisher<oculus_interfaces::msg::Ping>::SharedPtr ping_publisher_{nullptr};
   rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr temperature_publisher_{nullptr};
   rclcpp::Publisher<sensor_msgs::msg::FluidPressure>::SharedPtr pressure_publisher_{nullptr};
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr depth_odom_publisher_{nullptr};
+
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr tare_pressure_service_{nullptr};
 
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_{nullptr};
 
@@ -197,11 +217,16 @@ private:
   void checkMinimalFlags(const uint8_t& flags) const;
   void publishStatus(const OculusStatusMsg& status);
   void publishPing(const oculus::PingMessage::ConstPtr& pingMetadata);
+  // Publishes the FluidPressure (in Pascals) and the tared depth Odometry from a
+  // raw sonar pressure reading (in bar). Shared by the status and ping callbacks.
+  void publishPressureAndDepth(const std_msgs::msg::Header& header, double pressure_bar);
+  void tarePressure(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   void handleDummy();
 };
 
 template <class T>
-void OculusSonarNode::updateRosConfigForParam(T& currentSonar_param, const T& new_param, const std::string& param_name) {
+void SonarDepthNode::updateRosConfigForParam(T& currentSonar_param, const T& new_param, const std::string& param_name) {
   if (currentSonar_param != new_param) {
     this->remove_on_set_parameters_callback(this->param_cb_.get());
     RCLCPP_WARN_STREAM(this->get_logger(),
@@ -209,12 +234,12 @@ void OculusSonarNode::updateRosConfigForParam(T& currentSonar_param, const T& ne
     currentSonar_param = new_param;
     this->set_parameter(rclcpp::Parameter(param_name, new_param));
     this->param_cb_ =
-        this->add_on_set_parameters_callback(std::bind(&OculusSonarNode::setConfigCallback, this, std::placeholders::_1));
+        this->add_on_set_parameters_callback(std::bind(&SonarDepthNode::setConfigCallback, this, std::placeholders::_1));
   }
 }
 
 template <class T>
-void OculusSonarNode::handleFeedbackForParam(rcl_interfaces::msg::SetParametersResult& result,
+void SonarDepthNode::handleFeedbackForParam(rcl_interfaces::msg::SetParametersResult& result,
     const rclcpp::Parameter& param,
     const T& old_val,
     const T& new_val,
@@ -232,4 +257,4 @@ void OculusSonarNode::handleFeedbackForParam(rcl_interfaces::msg::SetParametersR
   }
 }
 
-#endif  // OCULUS_ROS2__OCULUS_SONAR_NODE_HPP_
+#endif  // OCULUS_ROS2__SONAR_DEPTH_NODE_HPP_

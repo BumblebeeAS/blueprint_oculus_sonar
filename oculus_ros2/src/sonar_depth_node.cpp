@@ -33,22 +33,29 @@
 
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
-#include <oculus_ros2/oculus_sonar_node.hpp>
+#include <oculus_ros2/sonar_depth_node.hpp>
 
 using SonarDriver = oculus::SonarDriver;
 
-OculusSonarNode::OculusSonarNode()
-    : Node("oculus_sonar"),
+SonarDepthNode::SonarDepthNode()
+    : Node("sonar_depth"),
       is_running_(this->declare_parameter<bool>("run", true)),
       sonar_viewer_(static_cast<rclcpp::Node*>(this)),
       frame_id_(this->declare_parameter<std::string>("frame_id", "auv4/sonar")),
-      use_gain_compensation_(this->declare_parameter<bool>("use_gain_compensation", false))
+      odom_msg_parent_frame_id_(this->declare_parameter<std::string>("odom_msg_parent_frame_id", "world")),
+      use_gain_compensation_(this->declare_parameter<bool>("use_gain_compensation", false)),
+      fluid_density_(this->declare_parameter<float>("fluid_density", 997.0474)),
+      z_covariance_(this->declare_parameter<float>("z_covariance", 0.2))
 
 {
     this->status_publisher_      = this->create_publisher<oculus_interfaces::msg::OculusStatus>("oculus/status", 1);
     this->ping_publisher_        = this->create_publisher<oculus_interfaces::msg::Ping>("oculus/ping", 1);
     this->temperature_publisher_ = this->create_publisher<sensor_msgs::msg::Temperature>("oculus/temperature", 1);
     this->pressure_publisher_    = this->create_publisher<sensor_msgs::msg::FluidPressure>("oculus/pressure", 1);
+    this->depth_odom_publisher_  = this->create_publisher<nav_msgs::msg::Odometry>("oculus/depth/odometry", 1);
+
+    this->tare_pressure_service_ = this->create_service<std_srvs::srv::Trigger>(
+        "oculus/tare_pressure", std::bind(&SonarDepthNode::tarePressure, this, std::placeholders::_1, std::placeholders::_2));
 
     this->sonar_driver_ = std::make_shared<SonarDriver>(this->io_service_.io_service());
     this->io_service_.start();
@@ -114,19 +121,19 @@ OculusSonarNode::OculusSonarNode()
         setConfigCallback(this->get_parameters(std::vector{param_name}));
     }
     this->param_cb_
-        = this->add_on_set_parameters_callback(std::bind(&OculusSonarNode::setConfigCallback, this,
+        = this->add_on_set_parameters_callback(std::bind(&SonarDepthNode::setConfigCallback, this,
                                                          std::placeholders::_1));  // TODO(hugoyvrn, to move before
                                                                                    // parameters initialisation ?)
 
-    this->sonar_driver_->add_status_callback(std::bind(&OculusSonarNode::publishStatus, this, std::placeholders::_1));
-    this->sonar_driver_->add_ping_callback(std::bind(&OculusSonarNode::publishPing, this, std::placeholders::_1));
+    this->sonar_driver_->add_status_callback(std::bind(&SonarDepthNode::publishStatus, this, std::placeholders::_1));
+    this->sonar_driver_->add_ping_callback(std::bind(&SonarDepthNode::publishPing, this, std::placeholders::_1));
 }
 
-OculusSonarNode::~OculusSonarNode() {
+SonarDepthNode::~SonarDepthNode() {
     this->io_service_.stop();
 }
 
-void OculusSonarNode::setMinimalFlags(uint8_t& flags) const {
+void SonarDepthNode::setMinimalFlags(uint8_t& flags) const {
     flags |= flagByte::RANGE_AS_METERS  // always in meters
              | flagByte::SEND_GAINS     // force send gain to true this
              | flagByte::SIMPLE_PING;   // use simple ping
@@ -150,7 +157,7 @@ void OculusSonarNode::setMinimalFlags(uint8_t& flags) const {
     flags &= ~0x80;
 }
 
-void OculusSonarNode::checkMinimalFlags(const uint8_t& flags) const {
+void SonarDepthNode::checkMinimalFlags(const uint8_t& flags) const {
     if (!(flags & flagByte::RANGE_AS_METERS)) {
         RCLCPP_ERROR(get_logger(),
                      "Range is attepreted as percent while ros "
@@ -168,7 +175,7 @@ void OculusSonarNode::checkMinimalFlags(const uint8_t& flags) const {
     }
 }
 
-void OculusSonarNode::publishStatus(const OculusStatusMsg& status) {
+void SonarDepthNode::publishStatus(const OculusStatusMsg& status) {
     static oculus_interfaces::msg::OculusStatus msg;
     oculus::toMsg(msg, status);
     this->status_publisher_->publish(msg);
@@ -180,15 +187,13 @@ void OculusSonarNode::publishStatus(const OculusStatusMsg& status) {
     temperature_ros_msg.variance        = 0;                    // 0 is interpreted as variance unknown
     this->temperature_publisher_->publish(temperature_ros_msg);
 
-    sensor_msgs::msg::FluidPressure pressure_ros_msg;
-    pressure_ros_msg.header.frame_id = frame_id_;
-    pressure_ros_msg.header.stamp    = this->now();
-    pressure_ros_msg.fluid_pressure  = status.pressure;  // Pressure reading in Pascals.
-    pressure_ros_msg.variance        = 0;                // 0 is interpreted as variance unknown
-    this->pressure_publisher_->publish(pressure_ros_msg);
+    std_msgs::msg::Header header;
+    header.frame_id = frame_id_;
+    header.stamp    = this->now();
+    this->publishPressureAndDepth(header, status.pressure);
 }
 
-void OculusSonarNode::updateRosConfig() {
+void SonarDepthNode::updateRosConfig() {
     std::shared_lock l(param_mutex_);
 
     updateRosConfigForParam<int>(currentRosParameters_.frequency_mode, currentSonarParameters_.frequency_mode,
@@ -210,7 +215,7 @@ void OculusSonarNode::updateRosConfig() {
                                     params::SALINITY.name);
 }
 
-void OculusSonarNode::publishPing(const oculus::PingMessage::ConstPtr& ping) {
+void SonarDepthNode::publishPing(const oculus::PingMessage::ConstPtr& ping) {
     // Update current config with ping information
     currentSonarParameters_.frequency_mode = ping->master_mode();
     currentSonarParameters_.range          = ping->range();
@@ -218,31 +223,79 @@ void OculusSonarNode::publishPing(const oculus::PingMessage::ConstPtr& ping) {
     currentSonarParameters_.sound_speed    = ping->speed_of_sound_used();
     updateRosConfig();
 
-    static oculus_interfaces::msg::Ping msg;
-    msg.header.frame_id = frame_id_;
-    oculus::toMsg(msg, ping);
-    this->ping_publisher_->publish(msg);
-
-    sensor_msgs::msg::Temperature temperature_ros_msg;
-    temperature_ros_msg.header      = msg.header;
-    temperature_ros_msg.temperature = msg.temperature;  // Degrees Celsius
-    temperature_ros_msg.variance    = 0;                // 0 is interpreted as variance unknown
-    this->temperature_publisher_->publish(temperature_ros_msg);
-
-    sensor_msgs::msg::FluidPressure pressure_ros_msg;
-    pressure_ros_msg.header         = msg.header;
-    pressure_ros_msg.fluid_pressure = msg.pressure;  // Absolute pressure reading in Pascals.
-    pressure_ros_msg.variance       = 0;             // 0 is interpreted as variance unknown
-    this->pressure_publisher_->publish(pressure_ros_msg);
-
+    // Depth-only fast path: read pressure straight off the ping object and skip the
+    // expensive full-image conversion (oculus::toMsg copies the whole acoustic frame).
+    // This keeps the callback light so the publish rate tracks the sonar's ping rate.
+    std_msgs::msg::Header header;
+    header.frame_id = frame_id_;
+    header.stamp    = this->now();
+    this->publishPressureAndDepth(header, ping->pressure());
     // TODO(hugoyvrn, publish bearings)
 
-    sonar_viewer_.publishFan(ping, frame_id_);                                // cartesian
-    sonar_viewer_.publishRaw(msg, frame_id_, use_gain_compensation_);         // polar
-    sonar_viewer_.publishPointCloud(msg, frame_id_, use_gain_compensation_);  // pointcloud sonar frame
+    // Full ping / image / point cloud publishing disabled for now — only depth is needed
+    // for testing. Re-enable this block to restore oculus/ping, temperature, and imagery.
+    // static oculus_interfaces::msg::Ping msg;
+    // msg.header.frame_id = frame_id_;
+    // oculus::toMsg(msg, ping);
+    // this->ping_publisher_->publish(msg);
+    //
+    // sensor_msgs::msg::Temperature temperature_ros_msg;
+    // temperature_ros_msg.header      = msg.header;
+    // temperature_ros_msg.temperature = msg.temperature;  // Degrees Celsius
+    // temperature_ros_msg.variance    = 0;                // 0 is interpreted as variance unknown
+    // this->temperature_publisher_->publish(temperature_ros_msg);
+    //
+    // sonar_viewer_.publishFan(ping, frame_id_);                                // cartesian
+    // sonar_viewer_.publishRaw(msg, frame_id_, use_gain_compensation_);         // polar
+    // sonar_viewer_.publishPointCloud(msg, frame_id_, use_gain_compensation_);  // pointcloud sonar frame
 }
 
-void OculusSonarNode::updateLocalParameters(SonarParameters& parameters,
+void SonarDepthNode::publishPressureAndDepth(const std_msgs::msg::Header& header, double pressure_bar) {
+    // The sonar reports external (gauge) pressure in bar; convert to Pascals for ROS.
+    const double pressure_pa = pressure_bar * BAR_TO_PA;
+    last_pressure_pa_.store(pressure_pa);
+    pressure_received_.store(true);
+
+    sensor_msgs::msg::FluidPressure pressure_ros_msg;
+    pressure_ros_msg.header         = header;
+    pressure_ros_msg.fluid_pressure = pressure_pa;  // Absolute pressure would be this + atmospheric.
+    pressure_ros_msg.variance       = 0;            // 0 is interpreted as variance unknown
+    this->pressure_publisher_->publish(pressure_ros_msg);
+
+    // Depth from gauge pressure: h = (P - P_tare) / (rho * g). No atmospheric term
+    // because the reading is gauge; P_tare is the user-set offset (see tarePressure).
+    const double depth = (pressure_pa - pressure_tare_pa_.load()) / (fluid_density_ * ACCL_GRAVITY);
+
+    nav_msgs::msg::Odometry odom_ros_msg;
+    odom_ros_msg.header.frame_id      = odom_msg_parent_frame_id_;
+    odom_ros_msg.header.stamp         = header.stamp;
+    odom_ros_msg.child_frame_id       = frame_id_;
+    odom_ros_msg.pose.pose.position.x = 0.0;
+    odom_ros_msg.pose.pose.position.y = 0.0;
+    odom_ros_msg.pose.pose.position.z = -depth;
+    odom_ros_msg.pose.covariance[14]  = z_covariance_;
+    this->depth_odom_publisher_->publish(odom_ros_msg);
+}
+
+void SonarDepthNode::tarePressure(const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+    if (!pressure_received_.load()) {
+        response->success = false;
+        response->message = "No pressure reading received yet; cannot tare.";
+        RCLCPP_WARN_STREAM(this->get_logger(), response->message);
+        return;
+    }
+
+    const double tare_pa = last_pressure_pa_.load();
+    pressure_tare_pa_.store(tare_pa);
+
+    response->success = true;
+    response->message = "Pressure tared at " + std::to_string(tare_pa) + " Pa (" +
+                        std::to_string(tare_pa / BAR_TO_PA) + " bar). Depth is now zeroed at this position.";
+    RCLCPP_INFO_STREAM(this->get_logger(), response->message);
+}
+
+void SonarDepthNode::updateLocalParameters(SonarParameters& parameters,
                                             const std::vector<rclcpp::Parameter>& new_parameters) {
     for (const rclcpp::Parameter& new_param : new_parameters) {
         if (new_param.get_name() == params::FREQUENCY_MODE.name) {
@@ -271,7 +324,7 @@ void OculusSonarNode::updateLocalParameters(SonarParameters& parameters,
     }
 }
 
-void OculusSonarNode::updateLocalParameters(SonarParameters& parameters, SonarDriver::PingConfig feedback) {
+void SonarDepthNode::updateLocalParameters(SonarParameters& parameters, SonarDriver::PingConfig feedback) {
     std::vector<rclcpp::Parameter> new_parameters;
     // OculusMessageHeader head;      // The standard message header
     // uint16_t oculusId;          // Fixed ID 0x4f53
@@ -331,7 +384,7 @@ void OculusSonarNode::updateLocalParameters(SonarParameters& parameters, SonarDr
     updateLocalParameters(parameters, new_parameters);
 }
 
-void OculusSonarNode::sendParamToSonar(rclcpp::Parameter param, rcl_interfaces::msg::SetParametersResult result) {
+void SonarDepthNode::sendParamToSonar(rclcpp::Parameter param, rcl_interfaces::msg::SetParametersResult result) {
     SonarDriver::PingConfig newConfig = currentConfig_;  // To avoid to create a new SonarDriver::PingConfig from
                                                          // ros parameters
     if (param.get_name() == params::FREQUENCY_MODE.name) {
@@ -424,7 +477,7 @@ void OculusSonarNode::sendParamToSonar(rclcpp::Parameter param, rcl_interfaces::
     }
 }
 
-rcl_interfaces::msg::SetParametersResult OculusSonarNode::setConfigCallback(
+rcl_interfaces::msg::SetParametersResult SonarDepthNode::setConfigCallback(
     const std::vector<rclcpp::Parameter>& parameters) {
     std::shared_lock l(param_mutex_);
 
@@ -471,7 +524,7 @@ rcl_interfaces::msg::SetParametersResult OculusSonarNode::setConfigCallback(
 
 int main(int argc, char* argv[]) {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<OculusSonarNode>());  // force to monothread
+    rclcpp::spin(std::make_shared<SonarDepthNode>());  // force to monothread
     rclcpp::shutdown();
     return 0;
 }
